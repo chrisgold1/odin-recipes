@@ -117,16 +117,20 @@
 
   // Expect a 2x2 range: row1 headers (Goal, Raised), row2 values
   function getGoalRaisedFromRange(rows){
-    if (rows.length < 2) return {goal:0, raised:0};
-    const headers = rows[0].map(h => (h||"").toString().trim().toLowerCase());
-    const vals    = rows[1] || [];
-    let goal=0, raised=0;
-    headers.forEach((h,i)=>{
-      if (h.includes("goal"))   goal   = toNumber(vals[i]);
-      if (h.includes("raised")) raised = toNumber(vals[i]);
-    });
-    return {goal, raised};
+  // rows[0] -> ["Goal", "<goal amount>"]
+  // rows[1] -> ["Raised", "<raised amount>"]
+  let goal = 0, raised = 0;
+  if (rows.length >= 2) {
+    if ((rows[0][0] || "").toLowerCase().includes("goal")) {
+      goal = toNumber(rows[0][1]);
+    }
+    if ((rows[1][0] || "").toLowerCase().includes("raised")) {
+      raised = toNumber(rows[1][1]);
+    }
   }
+  return {goal, raised};
+}
+
 
   let prevGoal = 0, prevRaised = 0;
   let lastRead = null;
