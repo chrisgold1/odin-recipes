@@ -27,8 +27,10 @@
 
 
 
-<div id="thermo-wrap" style="max-width:340px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
-  <div id="goalLabel" style="text-align:center;font-weight:700;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
+
+<div id="thermo-wrap" style="max-width:360px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <div id="goalLabel" style="text-align:center;font-weight:800;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
+
   <svg id="thermo" viewBox="0 0 200 420" width="100%" height="auto" role="img" aria-label="Fundraising Thermometer">
     <defs>
       <clipPath id="tubeClip">
@@ -51,10 +53,12 @@
       <circle cx="100" cy="340" r="46" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
     </g>
 
-    <!-- red fill -->
+    <!-- red fill (animated by JS) -->
     <g clip-path="url(#tubeClip)">
       <rect id="tubeFill" x="86" y="300" width="28" height="0" fill="#e74c3c"/>
     </g>
+
+    <!-- bulb fill (pulses on update) -->
     <circle id="bulbFill" cx="100" cy="340" r="40" fill="#e74c3c"/>
 
     <!-- callout badges -->
@@ -69,14 +73,27 @@
       </g>
     </g>
   </svg>
-  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">updates when you edit the Google Sheet</div>
+
+  <style>
+    /* simple pulse on update */
+    @keyframes pulse {
+      0% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(231,76,60,0)); }
+      50% { transform: scale(1.04); filter: drop-shadow(0 0 8px rgba(231,76,60,.45)); }
+      100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(231,76,60,0)); }
+    }
+  </style>
+
+  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">auto-updates when you edit the Google Sheet</div>
 </div>
 
 <script>
 (function(){
-  // Your published CSV:
+  // === CONFIG ===
   const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pub?gid=0&single=true&output=csv";
+  const DURATION_MS = 1100;         // animation duration
+  const REFRESH_MS = 0;             // set e.g. 300000 for 5-min refresh
 
+  // === Helpers ===
   const fmtMoney = n => {
     const sign = n < 0 ? "-" : "";
     const v = Math.abs(Number(n)||0);
@@ -84,80 +101,113 @@
   };
   const toNumber = s => {
     if (s == null) return 0;
-    // strip $, commas, spaces, any non-digit/decimal
-    const cleaned = String(s).replace(/[^0-9.\-]/g, "");
-    return Number(cleaned || 0);
+    return Number(String(s).replace(/[^\d.\-]/g,"")) || 0;
   };
+  const easeOutCubic = t => 1 - Math.pow(1 - t, 3); // smoother end
 
-  // draw ticks (0..100%)
+  // draw ticks
   const ticksG = document.querySelector("#ticks");
   for (let i=0;i<=10;i++){
     const y = 300 - i*(260/10);
     const len = (i%5===0)?12:7;
-    const x1 = 100 - len, x2 = 100 + len;
     const line = document.createElementNS("http://www.w3.org/2000/svg","line");
-    line.setAttribute("x1", x1); line.setAttribute("x2", x2);
-    line.setAttribute("y1", y);  line.setAttribute("y2", y);
+    line.setAttribute("x1", 100-len); line.setAttribute("x2", 100+len);
+    line.setAttribute("y1", y);       line.setAttribute("y2", y);
     ticksG.appendChild(line);
   }
 
-  function update(goal, raised){
-    goal   = Math.max(0, Number(goal)||0);
+  // state for animated transitions
+  let prevGoal = 0, prevRaised = 0;
+
+  function animateTo(goal, raised){
+    goal = Math.max(0, Number(goal)||0);
     raised = Math.max(0, Number(raised)||0);
-    const pct = goal>0 ? Math.min(raised/goal, 1) : 0;
 
-    document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(goal);
-    document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
-    document.getElementById("amtText").textContent   = fmtMoney(raised);
+    const startGoal  = prevGoal;
+    const startRaised= prevRaised;
 
+    const start = performance.now();
     const tubeHeight = 260;
-    const h = Math.round(tubeHeight * pct);
-    const y = 300 - h;
-    const tubeFill = document.getElementById("tubeFill");
-    tubeFill.setAttribute("y", y);
-    tubeFill.setAttribute("height", h);
 
-    const yBadge = Math.max(60, Math.min(300 - h, 280));
-    document.getElementById("pctBadge").setAttribute("transform", `translate(60, ${yBadge})`);
-    document.getElementById("amtBadge").setAttribute("transform", `translate(140, ${yBadge})`);
+    function frame(now){
+      const t = Math.min(1, (now - start) / DURATION_MS);
+      const k = easeOutCubic(t);
+
+      const g = startGoal  + (goal   - startGoal)  * k;
+      const r = startRaised+ (raised - startRaised)* k;
+      const pct = g>0 ? Math.min(r/g, 1) : 0;
+
+      // numbers
+      document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(g);
+      document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
+      document.getElementById("amtText").textContent   = fmtMoney(r);
+
+      // fill
+      const h = Math.round(tubeHeight * pct);
+      const y = 300 - h;
+      const tubeFill = document.getElementById("tubeFill");
+      tubeFill.setAttribute("y", y);
+      tubeFill.setAttribute("height", h);
+
+      // badges follow the fill
+      const yBadge = Math.max(60, Math.min(300 - h, 280));
+      document.getElementById("pctBadge").setAttribute("transform", `translate(60, ${yBadge})`);
+      document.getElementById("amtBadge").setAttribute("transform", `translate(140, ${yBadge})`);
+
+      if (t < 1) requestAnimationFrame(frame);
+      else {
+        prevGoal = goal; prevRaised = raised;
+        // bulb pulse once at the end
+        const bulb = document.getElementById("bulbFill");
+        bulb.style.animation = "pulse 600ms ease-out 1";
+        setTimeout(()=> bulb.style.animation = "none", 650);
+      }
+    }
+    requestAnimationFrame(frame);
   }
 
-  // Parse CSV with "Description,Amount" rows.
-  fetch(CSV_URL)
-    .then(r => r.text())
-    .then(text => {
-      // split into rows, handle quoted commas by simple CSV parser
-      const rows = [];
-      let row = [], cur = "", inQ = false;
-      for (let i=0;i<text.length;i++){
-        const c = text[i], n = text[i+1];
-        if (c === '"'){ inQ = !inQ; continue; }
-        if (c === ',' && !inQ){ row.push(cur); cur = ""; continue; }
-        if ((c === '\n' || (c === '\r' && n !== '\n')) && !inQ){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
-        cur += c;
-      }
-      if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  // tolerant CSV reader
+  function parseCsv(text){
+    const rows = [];
+    let row=[], cur="", inQ=false;
+    for (let i=0;i<text.length;i++){
+      const c=text[i], n=text[i+1];
+      if (c === '"'){ inQ = !inQ; continue; }
+      if (c === ',' && !inQ){ row.push(cur); cur=""; continue; }
+      if ((c === '\n' || (c === '\r' && n !== '\n')) && !inQ){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
+      cur += c;
+    }
+    if (cur.length || row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+  function extractGoalRaised(rows){
+    let goal=0, raised=0;
+    for (const r of rows){
+      const a = (r[0]||"").toString().trim().toLowerCase();
+      const b = (r[1]||"").toString().trim();
+      if (!a) continue;
+      if (a.includes("goal"))   goal   = toNumber(b);
+      if (a.includes("raised")) raised = toNumber(b);
+    }
+    return {goal, raised};
+  }
 
-      let goal = 0, raised = 0;
-      for (const r of rows){
-        const desc = (r[0] || "").toString().trim().toLowerCase();
-        const amt  = toNumber(r[1]);
-        if (desc === "goal")   goal   = amt;
-        if (desc === "raised") raised = amt;
-      }
-      if (!goal && !raised){
-        // Fallback: try to find by scanning lines for keywords
-        const lower = text.toLowerCase();
-        const mGoal = lower.match(/goal.*?([\$0-9,.\-]+)/);
-        const mRaised = lower.match(/raised.*?([\$0-9,.\-]+)/);
-        if (mGoal) goal = toNumber(mGoal[1]);
-        if (mRaised) raised = toNumber(mRaised[1]);
-      }
-      update(goal, raised);
-    })
-    .catch(()=> update(10000, 2500)); // fallback demo
+  function loadOnce(){
+    fetch(CSV_URL, {cache:"no-store"})
+      .then(r => r.text())
+      .then(text => {
+        const rows = parseCsv(text);
+        const {goal, raised} = extractGoalRaised(rows);
+        animateTo(goal, raised);
+      })
+      .catch(()=> animateTo(10000, 2500)); // fallback demo
+  }
+
+  loadOnce();
+  if (REFRESH_MS > 0) setInterval(loadOnce, REFRESH_MS);
 })();
 </script>
+
 
 </body>
 
