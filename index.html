@@ -26,8 +26,6 @@
 
 
 
-
-
 <div id="thermo-wrap" style="max-width:360px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
   <div id="goalLabel" style="text-align:center;font-weight:800;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
 
@@ -53,12 +51,10 @@
       <circle cx="100" cy="340" r="46" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
     </g>
 
-    <!-- red fill (animated by JS) -->
+    <!-- red fill -->
     <g clip-path="url(#tubeClip)">
       <rect id="tubeFill" x="86" y="300" width="28" height="0" fill="#e74c3c"/>
     </g>
-
-    <!-- bulb fill (pulses on update) -->
     <circle id="bulbFill" cx="100" cy="340" r="40" fill="#e74c3c"/>
 
     <!-- callout badges -->
@@ -75,138 +71,125 @@
   </svg>
 
   <style>
-    /* simple pulse on update */
-    @keyframes pulse {
-      0% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(231,76,60,0)); }
-      50% { transform: scale(1.04); filter: drop-shadow(0 0 8px rgba(231,76,60,.45)); }
-      100% { transform: scale(1); filter: drop-shadow(0 0 0 rgba(231,76,60,0)); }
-    }
+    @keyframes pulse { 0%{transform:scale(1)} 50%{transform:scale(1.04)} 100%{transform:scale(1)} }
   </style>
 
-  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">auto-updates when you edit the Google Sheet</div>
+  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">updates when you edit the Google Sheet</div>
 </div>
 
 <script>
 (function(){
-  // === CONFIG ===
+  // Your published CSV link:
   const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pub?gid=0&single=true&output=csv";
-  const DURATION_MS = 1100;         // animation duration
-  const REFRESH_MS = 0;             // set e.g. 300000 for 5-min refresh
 
-  // === Helpers ===
+  const DURATION_MS = 900;
+
   const fmtMoney = n => {
     const sign = n < 0 ? "-" : "";
     const v = Math.abs(Number(n)||0);
     return sign + "$" + v.toLocaleString(undefined,{maximumFractionDigits:0});
   };
-  const toNumber = s => {
-    if (s == null) return 0;
-    return Number(String(s).replace(/[^\d.\-]/g,"")) || 0;
-  };
-  const easeOutCubic = t => 1 - Math.pow(1 - t, 3); // smoother end
+  const toNumber = s => Number(String(s||"").replace(/[^\d.\-]/g,"")) || 0;
+  const easeOut = t => 1 - Math.pow(1-t,3);
 
-  // draw ticks
+  // draw ticks (0..100%)
   const ticksG = document.querySelector("#ticks");
   for (let i=0;i<=10;i++){
     const y = 300 - i*(260/10);
     const len = (i%5===0)?12:7;
-    const line = document.createElementNS("http://www.w3.org/2000/svg","line");
-    line.setAttribute("x1", 100-len); line.setAttribute("x2", 100+len);
-    line.setAttribute("y1", y);       line.setAttribute("y2", y);
-    ticksG.appendChild(line);
+    const ln = document.createElementNS("http://www.w3.org/2000/svg","line");
+    ln.setAttribute("x1",100-len); ln.setAttribute("x2",100+len);
+    ln.setAttribute("y1",y); ln.setAttribute("y2",y);
+    ticksG.appendChild(ln);
   }
 
-  // state for animated transitions
-  let prevGoal = 0, prevRaised = 0;
-
-  function animateTo(goal, raised){
-    goal = Math.max(0, Number(goal)||0);
-    raised = Math.max(0, Number(raised)||0);
-
-    const startGoal  = prevGoal;
-    const startRaised= prevRaised;
-
-    const start = performance.now();
-    const tubeHeight = 260;
-
-    function frame(now){
-      const t = Math.min(1, (now - start) / DURATION_MS);
-      const k = easeOutCubic(t);
-
-      const g = startGoal  + (goal   - startGoal)  * k;
-      const r = startRaised+ (raised - startRaised)* k;
-      const pct = g>0 ? Math.min(r/g, 1) : 0;
-
-      // numbers
-      document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(g);
-      document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
-      document.getElementById("amtText").textContent   = fmtMoney(r);
-
-      // fill
-      const h = Math.round(tubeHeight * pct);
-      const y = 300 - h;
-      const tubeFill = document.getElementById("tubeFill");
-      tubeFill.setAttribute("y", y);
-      tubeFill.setAttribute("height", h);
-
-      // badges follow the fill
-      const yBadge = Math.max(60, Math.min(300 - h, 280));
-      document.getElementById("pctBadge").setAttribute("transform", `translate(60, ${yBadge})`);
-      document.getElementById("amtBadge").setAttribute("transform", `translate(140, ${yBadge})`);
-
-      if (t < 1) requestAnimationFrame(frame);
-      else {
-        prevGoal = goal; prevRaised = raised;
-        // bulb pulse once at the end
-        const bulb = document.getElementById("bulbFill");
-        bulb.style.animation = "pulse 600ms ease-out 1";
-        setTimeout(()=> bulb.style.animation = "none", 650);
-      }
-    }
-    requestAnimationFrame(frame);
-  }
-
-  // tolerant CSV reader
-  function parseCsv(text){
-    const rows = [];
-    let row=[], cur="", inQ=false;
-    for (let i=0;i<text.length;i++){
-      const c=text[i], n=text[i+1];
-      if (c === '"'){ inQ = !inQ; continue; }
-      if (c === ',' && !inQ){ row.push(cur); cur=""; continue; }
-      if ((c === '\n' || (c === '\r' && n !== '\n')) && !inQ){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
+  // CSV parser (handles quotes/commas)
+  function parseCsv(t){
+    const rows=[]; let row=[], cur="", q=false;
+    for (let i=0;i<t.length;i++){
+      const c=t[i], n=t[i+1];
+      if (c === '"'){ q=!q; continue; }
+      if (c === ',' && !q){ row.push(cur); cur=""; continue; }
+      if ((c === '\n' || (c === '\r' && n !== '\n')) && !q){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
       cur += c;
     }
     if (cur.length || row.length){ row.push(cur); rows.push(row); }
     return rows;
   }
-  function extractGoalRaised(rows){
+
+  // Find "goal"/"raised" anywhere in the grid; take value from next cell to the RIGHT
+  function findGoalRaised(rows){
     let goal=0, raised=0;
-    for (const r of rows){
-      const a = (r[0]||"").toString().trim().toLowerCase();
-      const b = (r[1]||"").toString().trim();
-      if (!a) continue;
-      if (a.includes("goal"))   goal   = toNumber(b);
-      if (a.includes("raised")) raised = toNumber(b);
+    for (let r=0; r<rows.length; r++){
+      const row = rows[r];
+      for (let c=0; c<row.length; c++){
+        const cell = String(row[c]||"").trim().toLowerCase();
+        if (!cell) continue;
+        if (cell === "goal" || cell.includes("goal")){
+          const val = row[c+1]; if (val!=null) goal = toNumber(val);
+        }
+        if (cell === "raised" || cell.includes("raised")){
+          const val = row[c+1]; if (val!=null) raised = toNumber(val);
+        }
+      }
     }
     return {goal, raised};
   }
 
-  function loadOnce(){
-    fetch(CSV_URL, {cache:"no-store"})
-      .then(r => r.text())
-      .then(text => {
-        const rows = parseCsv(text);
-        const {goal, raised} = extractGoalRaised(rows);
-        animateTo(goal, raised);
-      })
-      .catch(()=> animateTo(10000, 2500)); // fallback demo
+  let prevGoal = 0, prevRaised = 0;
+  function animate(goal, raised){
+    const startG=prevGoal, startR=prevRaised;
+    const t0 = performance.now(), tubeH=260;
+
+    function frame(now){
+      const t = Math.min(1, (now - t0)/DURATION_MS);
+      const k = easeOut(t);
+      const g = startG + (goal - startG)*k;
+      const r = startR + (raised - startR)*k;
+      const pct = g>0 ? Math.min(r/g,1) : 0;
+
+      document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(g);
+      document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
+      document.getElementById("amtText").textContent   = fmtMoney(r);
+
+      const h = Math.round(tubeH*pct), y = 300 - h;
+      const fill = document.getElementById("tubeFill");
+      fill.setAttribute("y", y); fill.setAttribute("height", h);
+
+      const yBadge = Math.max(60, Math.min(300 - h, 280));
+      document.getElementById("pctBadge").setAttribute("transform", `translate(60, ${yBadge})`);
+      document.getElementById("amtBadge").setAttribute("transform", `translate(140, ${yBadge})`);
+
+      if (t<1) requestAnimationFrame(frame); else { prevGoal=goal; prevRaised=raised; }
+    }
+    requestAnimationFrame(frame);
+
+    // pulse bulb
+    const bulb = document.getElementById("bulbFill");
+    bulb.style.animation = "pulse 600ms ease-out 1";
+    setTimeout(()=> bulb.style.animation="none", 700);
   }
 
-  loadOnce();
-  if (REFRESH_MS > 0) setInterval(loadOnce, REFRESH_MS);
+  function load(){
+    fetch(CSV_URL,{cache:"no-store"})
+      .then(r=>r.text())
+      .then(t=>{
+        const rows = parseCsv(t);
+        const {goal, raised} = findGoalRaised(rows);
+        // fallback: if nothing found, try first two numeric cells
+        if (!goal && !raised){
+          const nums = rows.flat().map(toNumber).filter(n=>n>0);
+          if (nums.length>=2){ animate(nums[0], nums[1]); return; }
+        }
+        animate(goal, raised);
+      })
+      .catch(()=> animate(10000,2500));
+  }
+
+  load();
 })();
 </script>
+
 
 
 </body>
