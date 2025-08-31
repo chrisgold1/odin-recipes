@@ -29,6 +29,10 @@
 
 
 
+
+
+
+
 <div id="thermo-wrap" style="max-width:360px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
   <div id="goalLabel" style="text-align:center;font-weight:800;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
 
@@ -40,19 +44,23 @@
       </filter>
     </defs>
 
+    <!-- spine + ticks -->
     <g>
       <line x1="100" y1="40" x2="100" y2="300" stroke="#9aa4ad" stroke-width="2" stroke-linecap="round"/>
       <g id="ticks" stroke="#9aa4ad" stroke-width="2"></g>
     </g>
 
+    <!-- tube + bulb outlines -->
     <g filter="url(#softShadow)">
       <rect x="80" y="34" width="40" height="268" rx="20" ry="20" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
       <circle cx="100" cy="340" r="46" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
     </g>
 
+    <!-- red fill -->
     <g clip-path="url(#tubeClip)"><rect id="tubeFill" x="86" y="300" width="28" height="0" fill="#e74c3c"/></g>
     <circle id="bulbFill" cx="100" cy="340" r="40" fill="#e74c3c"/>
 
+    <!-- badges -->
     <g id="callouts" font-size="12" fill="#fff" text-anchor="middle">
       <g id="pctBadge" transform="translate(60,220)">
         <rect x="-22" y="-12" rx="10" ry="10" width="44" height="24" fill="#3f4b57"></rect>
@@ -74,12 +82,15 @@
 
 <script>
 (function(){
-  // === YOUR TIGHT-RANGE CSV URL (same file/gid/range, but CSV instead of HTML) ===
-  const CSV_URL_BASE = "https://docs.google.com/spreadsheets/d/1WnM0f7PG3sramVRZCvnRygvbsFGtEycJc4K4eUsMl_E/export?format=csv&gid=0&range=G5:H6";
+  // === CSV export for EXACT cells G5:H6 (same file/gid/range you shared) ===
+  const CSV_URL_BASE =
+    "https://docs.google.com/spreadsheets/d/1WnM0f7PG3sramVRZCvnRygvbsFGtEycJc4K4eUsMl_E/export?format=csv&gid=0&range=G5:H6";
 
-  const POLL_MS = 30000;   // check every 30s (use 60000+ in production)
-  const DURATION_MS = 900; // animation duration
+  // Tuning
+  const POLL_MS = 1000;   // 10s while testing; bump to 30000–60000 for production
+  const DURATION_MS = 3000; // animation
 
+  // Helpers
   const fmtMoney = n => {
     const sign = n < 0 ? "-" : "";
     const v = Math.abs(Number(n)||0);
@@ -89,8 +100,8 @@
   const easeOut = t => 1 - Math.pow(1-t,3);
 
   // draw ticks once
-  (function drawTicks(){
-    const g = document.querySelector("#ticks"); if (!g) return;
+  (function(){
+    const g = document.querySelector("#ticks");
     for (let i=0;i<=10;i++){
       const y = 300 - i*(260/10);
       const len = (i%5===0)?12:7;
@@ -101,7 +112,7 @@
     }
   })();
 
-  // minimal CSV parser
+  // Simple CSV parser
   function parseCsv(t){
     const rows=[]; let row=[], cur="", q=false;
     for (let i=0;i<t.length;i++){
@@ -115,26 +126,21 @@
     return rows;
   }
 
-  // Expect a 2x2 range: row1 headers (Goal, Raised), row2 values
+  // HARD-CODED to your schema:
+  // rows[0] -> ["Goal",  <H5 amount>]
+  // rows[1] -> ["Raised",<H6 amount>]
   function getGoalRaisedFromRange(rows){
-  // rows[0] -> ["Goal", "<goal amount>"]
-  // rows[1] -> ["Raised", "<raised amount>"]
-  let goal = 0, raised = 0;
-  if (rows.length >= 2) {
-    if ((rows[0][0] || "").toLowerCase().includes("goal")) {
-      goal = toNumber(rows[0][1]);
+    let goal = 0, raised = 0;
+    if (rows.length >= 2) {
+      const r0c0 = (rows[0][0] || "").toString().trim().toLowerCase();
+      const r1c0 = (rows[1][0] || "").toString().trim().toLowerCase();
+      if (r0c0.includes("goal"))   goal   = toNumber(rows[0][1]);
+      if (r1c0.includes("raised")) raised = toNumber(rows[1][1]);
     }
-    if ((rows[1][0] || "").toLowerCase().includes("raised")) {
-      raised = toNumber(rows[1][1]);
-    }
+    return {goal, raised};
   }
-  return {goal, raised};
-}
-
 
   let prevGoal = 0, prevRaised = 0;
-  let lastRead = null;
-  let pending  = null; // first read waiting for confirmation
 
   function animateTo(goal, raised){
     const startG=prevGoal, startR=prevRaised, t0 = performance.now(), tubeH=260;
@@ -144,7 +150,8 @@
       const k = easeOut(t);
       const g = startG + (goal - startG)*k;
       const r = startR + (raised - startR)*k;
-      const pct = g>0 ? Math.min(r/g,1) : 0;
+      const rawPct = g > 0 ? r / g : 0;
+      const pct = g > 0 ? Math.min(Math.max(rawPct, 0.01), 1) : 0;
 
       document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(g);
       document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
@@ -177,18 +184,10 @@
         const rows = parseCsv(text);
         const {goal, raised} = getGoalRaisedFromRange(rows);
         if (!goal && !raised) return;
-
-        const current = {goal:Number(goal)||0, raised:Number(raised)||0};
-
-        // two-read stabilizer: require the same values twice in a row
-        if (!pending || pending.goal !== current.goal || pending.raised !== current.raised) {
-          pending = current;
-          return; // wait for next poll to confirm
+        // Animate only if changed (or on first paint)
+        if (goal !== prevGoal || raised !== prevRaised || (prevGoal===0 && prevRaised===0)) {
+          animateTo(goal, raised);
         }
-
-        const changed = (current.goal !== prevGoal) || (current.raised !== prevRaised);
-        if (!lastRead || changed) animateTo(current.goal, current.raised);
-        lastRead = current;
       })
       .catch(() => {
         if (prevGoal === 0 && prevRaised === 0) animateTo(10000, 2500);
@@ -199,8 +198,6 @@
   setInterval(loadOnce, POLL_MS);
 })();
 </script>
-
-
 
 
 
