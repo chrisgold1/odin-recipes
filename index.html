@@ -28,14 +28,58 @@
 
 
 
+
+<div id="thermo-wrap" style="max-width:360px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <div id="goalLabel" style="text-align:center;font-weight:800;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
+
+  <svg id="thermo" viewBox="0 0 200 420" width="100%" height="auto" role="img" aria-label="Fundraising Thermometer">
+    <defs>
+      <clipPath id="tubeClip"><rect x="86" y="40" width="28" height="250" rx="14" ry="14"/></clipPath>
+      <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.18"/>
+      </filter>
+    </defs>
+
+    <g>
+      <line x1="100" y1="40" x2="100" y2="300" stroke="#9aa4ad" stroke-width="2" stroke-linecap="round"/>
+      <g id="ticks" stroke="#9aa4ad" stroke-width="2"></g>
+    </g>
+
+    <g filter="url(#softShadow)">
+      <rect x="80" y="34" width="40" height="268" rx="20" ry="20" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
+      <circle cx="100" cy="340" r="46" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
+    </g>
+
+    <g clip-path="url(#tubeClip)"><rect id="tubeFill" x="86" y="300" width="28" height="0" fill="#e74c3c"/></g>
+    <circle id="bulbFill" cx="100" cy="340" r="40" fill="#e74c3c"/>
+
+    <g id="callouts" font-size="12" fill="#fff" text-anchor="middle">
+      <g id="pctBadge" transform="translate(60,220)">
+        <rect x="-22" y="-12" rx="10" ry="10" width="44" height="24" fill="#3f4b57"></rect>
+        <text id="pctText" y="5" font-weight="700">0%</text>
+      </g>
+      <g id="amtBadge" transform="translate(140,220)">
+        <rect x="-36" y="-12" rx="10" ry="10" width="72" height="24" fill="#3f4b57"></rect>
+        <text id="amtText" y="5" font-weight="700">$0</text>
+      </g>
+    </g>
+  </svg>
+
+  <style>
+    @keyframes pulse { 0% { transform: scale(1) } 50% { transform: scale(1.04) } 100% { transform: scale(1) } }
+  </style>
+
+  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">auto-refreshing from Google Sheets</div>
+</div>
+
 <script>
 (function(){
-  // ==== CONFIG ====
-  const CSV_URL_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pubhtml?gid=0&single=true&range=G5:H6";
-  const POLL_MS = 1000;   // 30s; use 60000+ in production
-  const DURATION_MS = 900; // animation time
+  // === YOUR TIGHT-RANGE CSV URL (same file/gid/range, but CSV instead of HTML) ===
+  const CSV_URL_BASE = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pub?gid=0&single=true&output=csv&range=G5:H6";
 
-  // ==== Helpers ====
+  const POLL_MS = 30000;   // check every 30s (use 60000+ in production)
+  const DURATION_MS = 900; // animation duration
+
   const fmtMoney = n => {
     const sign = n < 0 ? "-" : "";
     const v = Math.abs(Number(n)||0);
@@ -44,33 +88,7 @@
   const toNumber = s => Number(String(s||"").replace(/[^\d.\-]/g,"")) || 0;
   const easeOut = t => 1 - Math.pow(1-t,3);
 
-  function parseCsv(text){
-    const rows=[]; let row=[], cur="", q=false;
-    for (let i=0;i<text.length;i++){
-      const c=text[i], n=text[i+1];
-      if (c === '"'){ q=!q; continue; }
-      if (c === ',' && !q){ row.push(cur); cur=""; continue; }
-      if ((c === '\n' || (c === '\r' && n !== '\n')) && !q){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
-      cur += c;
-    }
-    if (cur.length || row.length){ row.push(cur); rows.push(row); }
-    return rows;
-  }
-
-  // Expect 2x2: headers row 1, values row 2 (Goal,Raised)
-  function getGoalRaisedFromTightRange(rows){
-    if (rows.length < 2) return {goal:0, raised:0};
-    const headers = rows[0].map(h => (h||"").toString().trim().toLowerCase());
-    const vals    = rows[1] || [];
-    let goal=0, raised=0;
-    headers.forEach((h,i)=>{
-      if (h === "goal")   goal   = toNumber(vals[i]);
-      if (h === "raised") raised = toNumber(vals[i]);
-    });
-    return {goal, raised};
-  }
-
-  // Draw ticks once
+  // draw ticks once
   (function drawTicks(){
     const g = document.querySelector("#ticks"); if (!g) return;
     for (let i=0;i<=10;i++){
@@ -83,12 +101,40 @@
     }
   })();
 
+  // minimal CSV parser
+  function parseCsv(t){
+    const rows=[]; let row=[], cur="", q=false;
+    for (let i=0;i<t.length;i++){
+      const c=t[i], n=t[i+1];
+      if (c === '"'){ q=!q; continue; }
+      if (c === ',' && !q){ row.push(cur); cur=""; continue; }
+      if ((c === '\n' || (c === '\r' && n !== '\n')) && !q){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
+      cur += c;
+    }
+    if (cur.length || row.length){ row.push(cur); rows.push(row); }
+    return rows;
+  }
+
+  // Expect a 2x2 range: row1 headers (Goal, Raised), row2 values
+  function getGoalRaisedFromRange(rows){
+    if (rows.length < 2) return {goal:0, raised:0};
+    const headers = rows[0].map(h => (h||"").toString().trim().toLowerCase());
+    const vals    = rows[1] || [];
+    let goal=0, raised=0;
+    headers.forEach((h,i)=>{
+      if (h.includes("goal"))   goal   = toNumber(vals[i]);
+      if (h.includes("raised")) raised = toNumber(vals[i]);
+    });
+    return {goal, raised};
+  }
+
   let prevGoal = 0, prevRaised = 0;
-  let lastRead = null;     // {goal, raised}
-  let pending = null;      // waiting for 2nd identical read
+  let lastRead = null;
+  let pending  = null; // first read waiting for confirmation
 
   function animateTo(goal, raised){
     const startG=prevGoal, startR=prevRaised, t0 = performance.now(), tubeH=260;
+
     function frame(now){
       const t = Math.min(1, (now - t0)/DURATION_MS);
       const k = easeOut(t);
@@ -125,18 +171,17 @@
       .then(r => r.text())
       .then(text => {
         const rows = parseCsv(text);
-        const {goal, raised} = getGoalRaisedFromTightRange(rows);
-        if (!goal && !raised) return; // ignore empty
+        const {goal, raised} = getGoalRaisedFromRange(rows);
+        if (!goal && !raised) return;
 
         const current = {goal:Number(goal)||0, raised:Number(raised)||0};
 
-        // Stabilizer: require two identical consecutive reads
+        // two-read stabilizer: require the same values twice in a row
         if (!pending || pending.goal !== current.goal || pending.raised !== current.raised) {
           pending = current;
           return; // wait for next poll to confirm
         }
 
-        // confirmed; only animate if values truly changed vs previous displayed
         const changed = (current.goal !== prevGoal) || (current.raised !== prevRaised);
         if (!lastRead || changed) animateTo(current.goal, current.raised);
         lastRead = current;
@@ -150,7 +195,6 @@
   setInterval(loadOnce, POLL_MS);
 })();
 </script>
-
 
 
 
