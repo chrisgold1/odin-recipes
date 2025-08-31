@@ -22,6 +22,143 @@
 
 
 <iframe width="290" height="376" seamless frameborder="0" scrolling="no" src="https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pubchart?oid=1897499110&amp;format=interactive"></iframe>
-    </body>
+    
+
+
+
+
+<div id="thermo-wrap" style="max-width:340px;margin:0 auto;font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;">
+  <div id="goalLabel" style="text-align:center;font-weight:700;letter-spacing:.5px;margin-bottom:10px;">GOAL: $0</div>
+  <svg id="thermo" viewBox="0 0 200 420" width="100%" height="auto" role="img" aria-label="Fundraising Thermometer">
+    <defs>
+      <clipPath id="tubeClip">
+        <rect x="86" y="40" width="28" height="250" rx="14" ry="14"></rect>
+      </clipPath>
+      <filter id="softShadow" x="-50%" y="-50%" width="200%" height="200%">
+        <feDropShadow dx="0" dy="2" stdDeviation="2" flood-opacity="0.18"/>
+      </filter>
+    </defs>
+
+    <!-- spine + ticks -->
+    <g>
+      <line x1="100" y1="40" x2="100" y2="300" stroke="#9aa4ad" stroke-width="2" stroke-linecap="round"/>
+      <g id="ticks" stroke="#9aa4ad" stroke-width="2"></g>
+    </g>
+
+    <!-- tube + bulb outlines -->
+    <g filter="url(#softShadow)">
+      <rect x="80" y="34" width="40" height="268" rx="20" ry="20" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
+      <circle cx="100" cy="340" r="46" fill="#ffffff" stroke="#3f4b57" stroke-width="6"/>
+    </g>
+
+    <!-- red fill -->
+    <g clip-path="url(#tubeClip)">
+      <rect id="tubeFill" x="86" y="300" width="28" height="0" fill="#e74c3c"/>
+    </g>
+    <circle id="bulbFill" cx="100" cy="340" r="40" fill="#e74c3c"/>
+
+    <!-- callout badges -->
+    <g id="callouts" font-size="12" fill="#fff" text-anchor="middle">
+      <g id="pctBadge" transform="translate(60,220)">
+        <rect x="-22" y="-12" rx="10" ry="10" width="44" height="24" fill="#3f4b57"></rect>
+        <text id="pctText" y="5" font-weight="700">0%</text>
+      </g>
+      <g id="amtBadge" transform="translate(140,220)">
+        <rect x="-36" y="-12" rx="10" ry="10" width="72" height="24" fill="#3f4b57"></rect>
+        <text id="amtText" y="5" font-weight="700">$0</text>
+      </g>
+    </g>
+  </svg>
+  <div style="text-align:center;color:#8a94a3;font-size:12px;margin-top:4px;">updates when you edit the Google Sheet</div>
+</div>
+
+<script>
+(function(){
+  // Your published CSV:
+  const CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vTnZ7xw1kKw5nEQn9DjNCih7x576di0OHbUhcrDh665l0OrNkullqQVeRG2ELAu1XtnmktenWlygybI/pub?gid=0&single=true&output=csv";
+
+  const fmtMoney = n => {
+    const sign = n < 0 ? "-" : "";
+    const v = Math.abs(Number(n)||0);
+    return sign + "$" + v.toLocaleString(undefined,{maximumFractionDigits:0});
+  };
+  const toNumber = s => {
+    if (s == null) return 0;
+    // strip $, commas, spaces, any non-digit/decimal
+    const cleaned = String(s).replace(/[^0-9.\-]/g, "");
+    return Number(cleaned || 0);
+  };
+
+  // draw ticks (0..100%)
+  const ticksG = document.querySelector("#ticks");
+  for (let i=0;i<=10;i++){
+    const y = 300 - i*(260/10);
+    const len = (i%5===0)?12:7;
+    const x1 = 100 - len, x2 = 100 + len;
+    const line = document.createElementNS("http://www.w3.org/2000/svg","line");
+    line.setAttribute("x1", x1); line.setAttribute("x2", x2);
+    line.setAttribute("y1", y);  line.setAttribute("y2", y);
+    ticksG.appendChild(line);
+  }
+
+  function update(goal, raised){
+    goal   = Math.max(0, Number(goal)||0);
+    raised = Math.max(0, Number(raised)||0);
+    const pct = goal>0 ? Math.min(raised/goal, 1) : 0;
+
+    document.getElementById("goalLabel").textContent = "GOAL: " + fmtMoney(goal);
+    document.getElementById("pctText").textContent   = Math.round(pct*100) + "%";
+    document.getElementById("amtText").textContent   = fmtMoney(raised);
+
+    const tubeHeight = 260;
+    const h = Math.round(tubeHeight * pct);
+    const y = 300 - h;
+    const tubeFill = document.getElementById("tubeFill");
+    tubeFill.setAttribute("y", y);
+    tubeFill.setAttribute("height", h);
+
+    const yBadge = Math.max(60, Math.min(300 - h, 280));
+    document.getElementById("pctBadge").setAttribute("transform", `translate(60, ${yBadge})`);
+    document.getElementById("amtBadge").setAttribute("transform", `translate(140, ${yBadge})`);
+  }
+
+  // Parse CSV with "Description,Amount" rows.
+  fetch(CSV_URL)
+    .then(r => r.text())
+    .then(text => {
+      // split into rows, handle quoted commas by simple CSV parser
+      const rows = [];
+      let row = [], cur = "", inQ = false;
+      for (let i=0;i<text.length;i++){
+        const c = text[i], n = text[i+1];
+        if (c === '"'){ inQ = !inQ; continue; }
+        if (c === ',' && !inQ){ row.push(cur); cur = ""; continue; }
+        if ((c === '\n' || (c === '\r' && n !== '\n')) && !inQ){ row.push(cur); rows.push(row); row=[]; cur=""; continue; }
+        cur += c;
+      }
+      if (cur.length || row.length) { row.push(cur); rows.push(row); }
+
+      let goal = 0, raised = 0;
+      for (const r of rows){
+        const desc = (r[0] || "").toString().trim().toLowerCase();
+        const amt  = toNumber(r[1]);
+        if (desc === "goal")   goal   = amt;
+        if (desc === "raised") raised = amt;
+      }
+      if (!goal && !raised){
+        // Fallback: try to find by scanning lines for keywords
+        const lower = text.toLowerCase();
+        const mGoal = lower.match(/goal.*?([\$0-9,.\-]+)/);
+        const mRaised = lower.match(/raised.*?([\$0-9,.\-]+)/);
+        if (mGoal) goal = toNumber(mGoal[1]);
+        if (mRaised) raised = toNumber(mRaised[1]);
+      }
+      update(goal, raised);
+    })
+    .catch(()=> update(10000, 2500)); // fallback demo
+})();
+</script>
+
+</body>
 
     
